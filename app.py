@@ -18,8 +18,10 @@ def verify():
     token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
 
-    if token == VERIFY_TOKEN:
-        return challenge
+    # SAFE CHECK (Meta strict validation)
+    if token and token == VERIFY_TOKEN:
+        return str(challenge)
+
     return "Invalid verification", 403
 
 
@@ -65,5 +67,8 @@ def home():
     return "ESP32 WhatsApp API Running"
 
 
+# =========================
+# RUN LOCALLY (Render uses gunicorn)
+# =========================
 if __name__ == "__main__":
     app.run(debug=True)

@@ -1,28 +1,38 @@
 from flask import Flask, request
 import requests
+import os
 
 app = Flask(__name__)
 
-# ESP32 endpoint (you will update later)
-ESP32_URL = "http://YOUR_ESP32_IP:5000/esp32"
-
-# WhatsApp token (Render env variable later)
-VERIFY_TOKEN = "esp32secure123"
+# =========================
+# CONFIG (use environment variable in production)
+# =========================
+ESP32_URL = os.getenv("ESP32_URL", "http://YOUR_ESP32_IP/esp32")
+VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "esp32secure123")
 
 
 # =========================
-# VERIFY WEBHOOK (Meta requirement)
+# HOME ROUTE (TEST)
+# =========================
+@app.route("/")
+def home():
+    return "ESP32 WhatsApp API Running"
+
+
+# =========================
+# VERIFY WEBHOOK (Meta REQUIREMENT FIXED)
 # =========================
 @app.route("/webhook", methods=["GET"])
 def verify():
+    mode = request.args.get("hub.mode")
     token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
 
-    # SAFE CHECK (Meta strict validation)
-    if token and token == VERIFY_TOKEN:
-        return str(challenge)
+    # STRICT Meta validation
+    if mode == "subscribe" and token == VERIFY_TOKEN:
+        return str(challenge), 200
 
-    return "Invalid verification", 403
+    return "Verification failed", 403
 
 
 # =========================
@@ -30,28 +40,35 @@ def verify():
 # =========================
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    data = request.get_json()
-
     try:
-        msg = data["entry"][0]["changes"][0]["value"]["messages"][0]["text"]["body"]
+        data = request.get_json()
 
-        print("Received:", msg)
+        # Safe extraction (prevents crash if JSON changes)
+        msg = (
+            data["entry"][0]["changes"][0]["value"]
+            ["messages"][0]["text"]["body"]
+        )
+
+        print("Received from WhatsApp:", msg)
 
         # =========================
-        # SAFE FORWARD TO ESP32
+        # FORWARD TO ESP32
         # =========================
         payload = {
             "command": msg
         }
 
         try:
-            requests.post(
+            response = requests.post(
                 ESP32_URL,
                 json=payload,
                 timeout=5
             )
+
+            print("ESP32 response:", response.text)
+
         except Exception as esp_err:
-            print("ESP32 error:", esp_err)
+            print("ESP32 connection error:", esp_err)
 
     except Exception as e:
         print("Webhook parsing error:", e)
@@ -60,15 +77,7 @@ def webhook():
 
 
 # =========================
-# TEST ROUTE
-# =========================
-@app.route("/")
-def home():
-    return "ESP32 WhatsApp API Running"
-
-
-# =========================
 # RUN LOCALLY (Render uses gunicorn)
 # =========================
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=True)

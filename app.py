@@ -35,11 +35,24 @@ def webhook():
 
         print("Received:", msg)
 
-        # Forward to ESP32
-        requests.post(ESP32_URL, data=msg)
+        # =========================
+        # SAFE FORWARD TO ESP32
+        # =========================
+        payload = {
+            "command": msg
+        }
+
+        try:
+            requests.post(
+                ESP32_URL,
+                json=payload,
+                timeout=5
+            )
+        except Exception as esp_err:
+            print("ESP32 error:", esp_err)
 
     except Exception as e:
-        print("Error:", e)
+        print("Webhook parsing error:", e)
 
     return "OK", 200
 

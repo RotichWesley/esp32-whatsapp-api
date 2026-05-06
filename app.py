@@ -1,16 +1,56 @@
 from flask import Flask, request
+import requests
 
 app = Flask(__name__)
 
+# ESP32 endpoint (you will update later)
+ESP32_URL = "http://YOUR_ESP32_IP:5000/esp32"
+
+# WhatsApp token (Render env variable later)
+VERIFY_TOKEN = "esp32secure123"
+
+
+# =========================
+# VERIFY WEBHOOK (Meta requirement)
+# =========================
+@app.route("/webhook", methods=["GET"])
+def verify():
+    token = request.args.get("hub.verify_token")
+    challenge = request.args.get("hub.challenge")
+
+    if token == VERIFY_TOKEN:
+        return challenge
+    return "Invalid verification", 403
+
+
+# =========================
+# RECEIVE WHATSAPP MESSAGES
+# =========================
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    data = request.get_json()
+
+    try:
+        msg = data["entry"][0]["changes"][0]["value"]["messages"][0]["text"]["body"]
+
+        print("Received:", msg)
+
+        # Forward to ESP32
+        requests.post(ESP32_URL, data=msg)
+
+    except Exception as e:
+        print("Error:", e)
+
+    return "OK", 200
+
+
+# =========================
+# TEST ROUTE
+# =========================
 @app.route("/")
 def home():
-    return "ESP32 Server Running"
+    return "ESP32 WhatsApp API Running"
 
-@app.route("/esp32", methods=["POST"])
-def esp32():
-    data = request.data.decode()
-    print("ESP32 DATA:", data)
-    return "OK"
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    app.run(debug=True)

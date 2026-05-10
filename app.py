@@ -1,5 +1,6 @@
 from flask import Flask, request
 import requests
+import time
 
 app = Flask(__name__)
 
@@ -11,10 +12,27 @@ VERIFY_TOKEN = "esp32secure123"
 
 PHONE_NUMBER_ID = "1147823905079127"
 
-ACCESS_TOKEN = "EAASO0nhfJKMBRbcatIQsGpZAoEQGgZA7BfsTKsp3o95VfN4NjhsAdjFcXyRdCIw7spQsn9yuebEWKYhBRHFw6GXe3qTWy54UAvGJit5djMaZCLfRAjEqZAX8q59dYRirZCyCmNLi4tOQKVLxmEW9zBELSQ92mDk4u70O28ZBkgvxLu60x5Gd40F9lvLqGkagZDZD"
+ACCESS_TOKEN = "EAASO0nhfJKMBRcD9qy4ZAfCclfgxZAA4T4PCKR8K1T52eZCUgYWVRgXep3dP4HRjGLIGngsQfAWcPoD7GbhVZAtsrN2GfiB1FZAHMpZAGB6Npl0HZBMCoZALQVMjSnZCu5bnULy9j5gWILvexq1e3FR8BJJvppANZAsU93dC1aNOEUdiZCQ3GuDn4I5tRH7TzAwgwZDZD"
 
-# CHANGE THIS TO YOUR ESP32 LOCAL IP
+# ESP32 LOCAL SERVER
 ESP32_URL = "http://192.168.137.132/esp32"
+
+# =========================================================
+# DEDUPLICATION (prevents repeated WhatsApp triggers)
+# =========================================================
+
+recent_messages = {}
+
+def is_duplicate(sender, text):
+    key = f"{sender}:{text}"
+    now = time.time()
+
+    if key in recent_messages:
+        if now - recent_messages[key] < 5:  # 5-second window
+            return True
+
+    recent_messages[key] = now
+    return False
 
 # =========================================================
 # SEND WHATSAPP MESSAGE
@@ -39,28 +57,19 @@ def send_whatsapp(to_number, text):
     }
 
     try:
-
-        response = requests.post(
-            url,
-            json=payload,
-            headers=headers,
-            timeout=10
-        )
-
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
         print("WhatsApp Status:", response.status_code)
         print("WhatsApp Response:", response.text)
 
     except Exception as e:
-
         print("WhatsApp Send Error:", e)
 
 # =========================================================
-# HEALTH CHECK
+# HOME ROUTE
 # =========================================================
 
 @app.route("/", methods=["GET"])
 def home():
-
     return "ESP32 WhatsApp API Running", 200
 
 # =========================================================
@@ -74,78 +83,64 @@ def verify_webhook():
     token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
 
-    print("Webhook Verification Request")
-
     if mode == "subscribe" and token == VERIFY_TOKEN:
-
         print("WEBHOOK VERIFIED")
         return str(challenge), 200
 
     return "Verification failed", 403
 
 # =========================================================
-# RECEIVE WHATSAPP MESSAGE
+# WEBHOOK RECEIVER
 # =========================================================
 
 @app.route("/webhook", methods=["POST"])
 def receive_messages():
 
     try:
-
         data = request.get_json()
 
-        print("================================================")
-        print("FULL WEBHOOK DATA:")
-        print(data)
-        print("================================================")
-
         entry = data.get("entry", [])
-
         if not entry:
             return "OK", 200
 
         changes = entry[0].get("changes", [])
-
         if not changes:
             return "OK", 200
 
         value = changes[0].get("value", {})
-
         messages = value.get("messages", [])
-
         if not messages:
             return "OK", 200
 
         message = messages[0]
 
         sender = message.get("from", "")
-
-        msg_type = message.get("type", "")
-
-        if msg_type != "text":
-            return "OK", 200
-
-        text = message.get("text", {}).get("body", "")
+        text = message.get("text", {}).get("body", "").strip()
 
         if not text:
             return "OK", 200
 
-        print("FROM:", sender)
-        print("MESSAGE:", text)
+        text_lower = text.lower()
 
-        # =================================================
-        # SEND COMMAND TO ESP32
-        # =================================================
+        print("FROM:", sender)
+        print("MESSAGE:", text_lower)
+
+        # =====================================================
+        # PREVENT DUPLICATES / LOOP
+        # =====================================================
+
+        if is_duplicate(sender, text_lower):
+            print("Duplicate message ignored")
+            return "OK", 200
+
+        # =====================================================
+        # SEND TO ESP32
+        # =====================================================
 
         try:
-
-            payload = {
-                "command": text
-            }
-
             esp_response = requests.post(
                 ESP32_URL,
-                json=payload,
+                json={"command": text_lower},
                 timeout=5
             )
 
@@ -153,28 +148,22 @@ def receive_messages():
             print("ESP32 RESPONSE:", esp_response.text)
 
         except Exception as esp_error:
-
             print("ESP32 ERROR:", esp_error)
 
-        # =================================================
-        # REPLY TO USER
-        # =================================================
+        # =====================================================
+        # REPLY TO USER (ONLY HERE → NO DUPLICATES)
+        # =====================================================
 
-        send_whatsapp(
-            sender,
-            f"✔ Command received: {text}"
-        )
+        send_whatsapp(sender, f"✔ Executed: {text}")
 
     except Exception as e:
-
         print("WEBHOOK ERROR:", e)
 
     return "OK", 200
 
 # =========================================================
-# MAIN
+# RUN SERVER
 # =========================================================
 
 if __name__ == "__main__":
-
     app.run(host="0.0.0.0", port=5000)

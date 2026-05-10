@@ -162,6 +162,31 @@ def receive_messages():
     return "OK", 200
 
 # =========================================================
+
+@app.route("/privacy", methods=["GET"])
+def privacy():
+    return """
+    <h1>Privacy Policy</h1>
+    <p>This system collects only WhatsApp messages for smart home automation.</p>
+    <p>No data is stored permanently or shared with third parties.</p>
+    """, 200
+
+
+@app.route("/terms", methods=["GET"])
+def terms():
+    return """
+    <h1>Terms of Service</h1>
+    <p>This system is used for controlling IoT devices via WhatsApp API.</p>
+    <p>Unauthorized use is prohibited.</p>
+    """, 200
+
+
+@app.route("/delete", methods=["GET", "POST"])
+def delete_data():
+    return """
+    <h1>Data Deletion Request</h1>
+    <p>To request data deletion, contact: rotichwesley15@gmail.com</p>
+    """, 200
 # RUN SERVER
 # =========================================================
 

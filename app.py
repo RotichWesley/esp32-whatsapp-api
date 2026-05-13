@@ -11,17 +11,28 @@ app = Flask(__name__)
 VERIFY_TOKEN = "esp32secure123"
 PHONE_NUMBER_ID = "1147823905079127"
 
-ACCESS_TOKEN = "EAASO0nhfJKMBRddJM0mZCvNazjDAcXEJIXZA1pm1kzrwPq2NbMvRxNYA29KVSvEfYxwxgtiYh047eRHgQ1yh5AB5HKcR9AugjdpYKBJ8ZBY2XUiRaNE6iAEgGqO9UlUDcZA5vMK4s6QoKTBQ74eBZAgEME9M9cSy9FvfHvcx2gMPkp1H5Dj4YaKufPRsAyon8Tf"
+ACCESS_TOKEN = "YOUR_META_ACCESS_TOKEN_HERE"
 
-ESP32_URL = "http://10.11.84.99/esp2"
+# FIXED: must match ESP32 endpoint
+ESP32_URL = "http://10.11.84.99/esp32"
 
 # =========================================================
-# DEDUPLICATION
+# DEDUPLICATION CACHE
 # =========================================================
 
 recent_messages = {}
 
+def cleanup_cache():
+    """Remove old entries to prevent memory growth"""
+    now = time.time()
+    keys_to_delete = [k for k, v in recent_messages.items() if now - v > 60]
+
+    for k in keys_to_delete:
+        del recent_messages[k]
+
 def is_duplicate(sender, text):
+    cleanup_cache()
+
     key = f"{sender}:{text}"
     now = time.time()
 
@@ -36,7 +47,6 @@ def is_duplicate(sender, text):
 # =========================================================
 
 def send_whatsapp(to_number, text):
-
     url = f"https://graph.facebook.com/v23.0/{PHONE_NUMBER_ID}/messages"
 
     headers = {
@@ -71,7 +81,6 @@ def home():
 
 @app.route("/webhook", methods=["GET"])
 def verify_webhook():
-
     mode = request.args.get("hub.mode")
     token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
@@ -83,14 +92,13 @@ def verify_webhook():
     return "Verification failed", 403
 
 # =========================================================
-# WEBHOOK RECEIVE
+# WEBHOOK RECEIVE (ROBUST VERSION)
 # =========================================================
 
 @app.route("/webhook", methods=["POST"])
 def receive_messages():
-
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
 
         entry = data.get("entry", [])
         if not entry:
@@ -108,18 +116,16 @@ def receive_messages():
         message = messages[0]
 
         sender = message.get("from")
-        text = message.get("text", {}).get("body", "").strip()
+        text = message.get("text", {}).get("body", "")
 
-        # 🔴 SAFETY CHECK (IMPORTANT FIX)
         if not sender or not text:
             return "OK", 200
 
-        text_lower = text.lower()
+        text_lower = text.strip().lower()
 
         print("FROM:", sender)
         print("MESSAGE:", text_lower)
 
-        # PREVENT DUPLICATES
         if is_duplicate(sender, text_lower):
             print("Duplicate ignored")
             return "OK", 200
@@ -127,18 +133,18 @@ def receive_messages():
         # SEND TO ESP32
         try:
             r = requests.post(
-            ESP32_URL,
-            data=text_lower,
-            headers={"Content-Type": "text/plain"},
-            timeout=5
-        )
+                ESP32_URL,
+                data=text_lower,
+                headers={"Content-Type": "text/plain"},
+                timeout=5
+            )
             print("ESP32:", r.status_code, r.text)
 
         except Exception as e:
             print("ESP32 ERROR:", e)
 
-        # REPLY ONCE
-        send_whatsapp(sender, f"✔ Executed: {text}")
+        # REPLY USER
+        send_whatsapp(sender, f"✔ Executed: {text_lower}")
 
     except Exception as e:
         print("WEBHOOK ERROR:", e)
@@ -146,12 +152,12 @@ def receive_messages():
     return "OK", 200
 
 # =========================================================
-# STATIC PAGES (FIX FOR META 404 ISSUE)
+# STATIC META PAGES
 # =========================================================
 
 @app.route("/privacy")
 def privacy():
-    return "<h1>Privacy Policy</h1><p>Smart home WhatsApp automation system.</p>", 200
+    return "<h1>Privacy Policy</h1><p>Smart home automation system.</p>", 200
 
 @app.route("/terms")
 def terms():

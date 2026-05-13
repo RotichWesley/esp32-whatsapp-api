@@ -127,10 +127,11 @@ def receive_messages():
         # SEND TO ESP32
         try:
             r = requests.post(
-                ESP32_URL,
-                json={"command": text_lower},
-                timeout=5
-            )
+            ESP32_URL,
+            data=text_lower,
+            headers={"Content-Type": "text/plain"},
+            timeout=5
+        )
             print("ESP32:", r.status_code, r.text)
 
         except Exception as e:

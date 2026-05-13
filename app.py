@@ -10,29 +10,25 @@ app = Flask(__name__)
 
 VERIFY_TOKEN = "esp32secure123"
 PHONE_NUMBER_ID = "1147823905079127"
-
 ACCESS_TOKEN = "YOUR_META_ACCESS_TOKEN_HERE"
 
-# FIXED: must match ESP32 endpoint
+# MUST MATCH ESP32 HTTP SERVER ROUTE
 ESP32_URL = "http://10.11.84.99/esp32"
 
 # =========================================================
-# DEDUPLICATION CACHE
+# MEMORY CACHE (ANTI DUPLICATE)
 # =========================================================
 
 recent_messages = {}
 
 def cleanup_cache():
-    """Remove old entries to prevent memory growth"""
     now = time.time()
-    keys_to_delete = [k for k, v in recent_messages.items() if now - v > 60]
-
-    for k in keys_to_delete:
-        del recent_messages[k]
+    for k in list(recent_messages.keys()):
+        if now - recent_messages[k] > 60:
+            del recent_messages[k]
 
 def is_duplicate(sender, text):
     cleanup_cache()
-
     key = f"{sender}:{text}"
     now = time.time()
 
@@ -63,9 +59,9 @@ def send_whatsapp(to_number, text):
 
     try:
         r = requests.post(url, json=payload, headers=headers, timeout=10)
-        print("WhatsApp:", r.status_code, r.text)
+        print("WhatsApp RESPONSE:", r.status_code, r.text)
     except Exception as e:
-        print("WhatsApp Error:", e)
+        print("WhatsApp ERROR:", e)
 
 # =========================================================
 # HOME
@@ -76,7 +72,7 @@ def home():
     return "ESP32 WhatsApp API Running", 200
 
 # =========================================================
-# WEBHOOK VERIFY
+# WEBHOOK VERIFY (META)
 # =========================================================
 
 @app.route("/webhook", methods=["GET"])
@@ -92,14 +88,15 @@ def verify_webhook():
     return "Verification failed", 403
 
 # =========================================================
-# WEBHOOK RECEIVE (ROBUST VERSION)
+# WEBHOOK RECEIVE (FIXED + ROBUST)
 # =========================================================
 
 @app.route("/webhook", methods=["POST"])
 def receive_messages():
     try:
-        data = request.get_json(silent=True) or {}
+        data = request.get_json(force=True, silent=True) or {}
 
+        # Safe navigation (Meta structure)
         entry = data.get("entry", [])
         if not entry:
             return "OK", 200
@@ -116,35 +113,48 @@ def receive_messages():
         message = messages[0]
 
         sender = message.get("from")
-        text = message.get("text", {}).get("body", "")
+        text = message.get("text", {}).get("body")
 
         if not sender or not text:
+            print("INVALID MESSAGE SKIPPED")
             return "OK", 200
 
-        text_lower = text.strip().lower()
+        # Normalize command
+        text_clean = text.strip().lower()
 
+        print("\n==============================")
         print("FROM:", sender)
-        print("MESSAGE:", text_lower)
+        print("MESSAGE:", text_clean)
+        print("==============================\n")
 
-        if is_duplicate(sender, text_lower):
-            print("Duplicate ignored")
+        # Duplicate protection
+        if is_duplicate(sender, text_clean):
+            print("DUPLICATE IGNORED")
             return "OK", 200
 
+        # =====================================================
         # SEND TO ESP32
+        # =====================================================
+
         try:
             r = requests.post(
                 ESP32_URL,
-                data=text_lower,
+                data=text_clean,
                 headers={"Content-Type": "text/plain"},
                 timeout=5
             )
-            print("ESP32:", r.status_code, r.text)
+
+            print("ESP32 STATUS:", r.status_code)
+            print("ESP32 RESPONSE:", r.text)
 
         except Exception as e:
-            print("ESP32 ERROR:", e)
+            print("ESP32 CONNECTION ERROR:", e)
 
-        # REPLY USER
-        send_whatsapp(sender, f"✔ Executed: {text_lower}")
+        # =====================================================
+        # AUTO REPLY USER
+        # =====================================================
+
+        send_whatsapp(sender, f"✔ Executed: {text_clean}")
 
     except Exception as e:
         print("WEBHOOK ERROR:", e)
@@ -152,7 +162,7 @@ def receive_messages():
     return "OK", 200
 
 # =========================================================
-# STATIC META PAGES
+# STATIC META REQUIRED PAGES
 # =========================================================
 
 @app.route("/privacy")
@@ -168,8 +178,8 @@ def delete():
     return "<h1>Data Deletion</h1><p>Email: rotichwesley15@gmail.com</p>", 200
 
 # =========================================================
-# RUN
+# RUN SERVER
 # =========================================================
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5000, debug=True)

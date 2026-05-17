@@ -1,185 +1,204 @@
+# ==============================================================================
+# Copyright 2026 The Kipsoen National Polytechnic All Rights Reserved.
+#
+# Software License Agreement (BSD License)
+#
+# Author: Kipkemoi Wesley, TeKNP
+# ==============================================================================
+#
+# Project: Hybrid Smart Home Automation System
+# (WhatsApp Cloud API + Flask + ESP32)
+#
+# DESCRIPTION
+# ------------------------------------------------------------------------------
+# This Flask server:
+#
+# 1. Receives WhatsApp messages from Meta Cloud API
+# 2. Processes user commands
+# 3. Forwards commands to ESP32
+# 4. Receives ESP32 responses
+# 5. Sends feedback back to WhatsApp user
+#
+# Supported Commands:
+#   - Room 1 On
+#   - Room 1 Off
+#   - Room 2 On
+#   - Room 2 Off
+#   - All Lights On
+#   - All Lights Off
+#   - Status
+#
+# ==============================================================================
+
 from flask import Flask, request
 import requests
-import time
+import json
 
 app = Flask(__name__)
 
-# =========================================================
+# ==============================================================================
 # CONFIGURATION
-# =========================================================
+# ==============================================================================
 
 VERIFY_TOKEN = "esp32secure123"
+
 PHONE_NUMBER_ID = "1147823905079127"
-ACCESS_TOKEN = "YOUR_META_ACCESS_TOKEN_HERE"
 
-# MUST MATCH ESP32 HTTP SERVER ROUTE
-ESP32_URL = "http://10.11.84.99/esp32"
+ACCESS_TOKEN = "EAASO0nhfJKMBReIXPAsVgmgCk3NBP6kRaQNzdZBuFHSZA2zH611JXO0wG9ZAsfMSZCj8KFozHir3hUURK3hDcOhZCcQFLUXhL1csA0GYw54mHhboh8E41t6OvuaWdm49GBnwLZAYPx3m4fJj9UOXPkMwJBkIFhxfQVcdPHVgHFb0TgrQeLGLfmJin2hIOJ6gZDZD"
 
-# =========================================================
-# MEMORY CACHE (ANTI DUPLICATE)
-# =========================================================
+# PUBLIC ESP32 ENDPOINT
+# Replace with your ngrok URL
+ESP32_URL = "https://YOUR-NGROK-URL.ngrok-free.app/command"
 
-recent_messages = {}
+# ==============================================================================
+# WHATSAPP SEND MESSAGE
+# ==============================================================================
 
-def cleanup_cache():
-    now = time.time()
-    for k in list(recent_messages.keys()):
-        if now - recent_messages[k] > 60:
-            del recent_messages[k]
+def send_whatsapp_message(to_number, message):
 
-def is_duplicate(sender, text):
-    cleanup_cache()
-    key = f"{sender}:{text}"
-    now = time.time()
-
-    if key in recent_messages and (now - recent_messages[key]) < 5:
-        return True
-
-    recent_messages[key] = now
-    return False
-
-# =========================================================
-# WHATSAPP SENDER
-# =========================================================
-
-def send_whatsapp(to_number, text):
-    url = f"https://graph.facebook.com/v23.0/{PHONE_NUMBER_ID}/messages"
+    url = f"https://graph.facebook.com/v22.0/{PHONE_NUMBER_ID}/messages"
 
     headers = {
         "Authorization": f"Bearer {ACCESS_TOKEN}",
         "Content-Type": "application/json"
     }
 
-    payload = {
+    data = {
         "messaging_product": "whatsapp",
         "to": to_number,
         "type": "text",
-        "text": {"body": text}
+        "text": {
+            "body": message
+        }
     }
 
     try:
-        r = requests.post(url, json=payload, headers=headers, timeout=10)
-        print("WhatsApp RESPONSE:", r.status_code, r.text)
+        response = requests.post(
+            url,
+            headers=headers,
+            json=data,
+            timeout=10
+        )
+
+        print("WhatsApp Response:", response.text)
+
     except Exception as e:
-        print("WhatsApp ERROR:", e)
+        print("WhatsApp Send Error:", str(e))
 
-# =========================================================
-# HOME
-# =========================================================
+# ==============================================================================
+# SEND COMMAND TO ESP32
+# ==============================================================================
 
-@app.route("/", methods=["GET"])
-def home():
-    return "ESP32 WhatsApp API Running", 200
+def send_command_to_esp32(command):
 
-# =========================================================
-# WEBHOOK VERIFY (META)
-# =========================================================
+    try:
 
-@app.route("/webhook", methods=["GET"])
+        response = requests.post(
+            ESP32_URL,
+            data=command,
+            timeout=10
+        )
+
+        print("ESP32 Response:", response.text)
+
+        return response.text
+
+    except Exception as e:
+
+        print("ESP32 Connection Error:", str(e))
+
+        return "ESP32 Offline or Unreachable"
+
+# ==============================================================================
+# WEBHOOK VERIFICATION
+# ==============================================================================
+
+@app.route('/webhook', methods=['GET'])
 def verify_webhook():
-    mode = request.args.get("hub.mode")
-    token = request.args.get("hub.verify_token")
+
+    verify_token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
 
-    if mode == "subscribe" and token == VERIFY_TOKEN:
-        print("WEBHOOK VERIFIED")
-        return str(challenge), 200
+    if verify_token == VERIFY_TOKEN:
+        return challenge
 
     return "Verification failed", 403
 
-# =========================================================
-# WEBHOOK RECEIVE (FIXED + ROBUST)
-# =========================================================
+# ==============================================================================
+# RECEIVE WHATSAPP MESSAGES
+# ==============================================================================
 
-@app.route("/webhook", methods=["POST"])
-def receive_messages():
+@app.route('/webhook', methods=['POST'])
+def webhook():
+
     try:
-        data = request.get_json(force=True, silent=True) or {}
 
-        # Safe navigation (Meta structure)
-        entry = data.get("entry", [])
-        if not entry:
-            return "OK", 200
+        data = request.get_json()
 
-        changes = entry[0].get("changes", [])
-        if not changes:
-            return "OK", 200
+        print(json.dumps(data, indent=2))
 
-        value = changes[0].get("value", {})
-        messages = value.get("messages", [])
-        if not messages:
-            return "OK", 200
+        # ----------------------------------------------------------------------
+        # EXTRACT WHATSAPP MESSAGE
+        # ----------------------------------------------------------------------
 
-        message = messages[0]
+        entry = data["entry"][0]
+        changes = entry["changes"][0]
+        value = changes["value"]
 
-        sender = message.get("from")
-        text = message.get("text", {}).get("body")
+        # Ignore statuses
+        if "messages" not in value:
+            return "ok", 200
 
-        if not sender or not text:
-            print("INVALID MESSAGE SKIPPED")
-            return "OK", 200
+        message = value["messages"][0]
 
-        # Normalize command
-        text_clean = text.strip().lower()
+        sender_number = message["from"]
 
-        print("\n==============================")
-        print("FROM:", sender)
-        print("MESSAGE:", text_clean)
-        print("==============================\n")
+        # Text message
+        if message["type"] == "text":
 
-        # Duplicate protection
-        if is_duplicate(sender, text_clean):
-            print("DUPLICATE IGNORED")
-            return "OK", 200
+            user_text = message["text"]["body"]
 
-        # =====================================================
-        # SEND TO ESP32
-        # =====================================================
+            print("Message:", user_text)
 
-        try:
-            r = requests.post(
-                ESP32_URL,
-                data=text_clean,
-                headers={"Content-Type": "text/plain"},
-                timeout=5
+            # ------------------------------------------------------------------
+            # SEND COMMAND TO ESP32
+            # ------------------------------------------------------------------
+
+            esp32_response = send_command_to_esp32(user_text)
+
+            # ------------------------------------------------------------------
+            # SEND FEEDBACK TO USER
+            # ------------------------------------------------------------------
+
+            send_whatsapp_message(
+                sender_number,
+                esp32_response
             )
 
-            print("ESP32 STATUS:", r.status_code)
-            print("ESP32 RESPONSE:", r.text)
-
-        except Exception as e:
-            print("ESP32 CONNECTION ERROR:", e)
-
-        # =====================================================
-        # AUTO REPLY USER
-        # =====================================================
-
-        send_whatsapp(sender, f"✔ Executed: {text_clean}")
+        return "ok", 200
 
     except Exception as e:
-        print("WEBHOOK ERROR:", e)
 
-    return "OK", 200
+        print("Webhook Error:", str(e))
 
-# =========================================================
-# STATIC META REQUIRED PAGES
-# =========================================================
+        return "error", 500
 
-@app.route("/privacy")
-def privacy():
-    return "<h1>Privacy Policy</h1><p>Smart home automation system.</p>", 200
+# ==============================================================================
+# ROOT ROUTE
+# ==============================================================================
 
-@app.route("/terms")
-def terms():
-    return "<h1>Terms</h1><p>IoT control system usage only.</p>", 200
+@app.route('/')
+def home():
 
-@app.route("/delete", methods=["GET", "POST"])
-def delete():
-    return "<h1>Data Deletion</h1><p>Email: rotichwesley15@gmail.com</p>", 200
+    return "ESP32 WhatsApp Smart Home API Running"
 
-# =========================================================
-# RUN SERVER
-# =========================================================
+# ==============================================================================
+# MAIN
+# ==============================================================================
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+if __name__ == '__main__':
+
+    app.run(
+        host='0.0.0.0',
+        port=5000
+    )

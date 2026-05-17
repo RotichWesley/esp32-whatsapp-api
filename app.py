@@ -5,20 +5,23 @@ import json
 app = Flask(__name__)
 
 # ============================================================
-# META WHATSAPP CONFIGURATION
+# CONFIGURATION
 # ============================================================
 
 VERIFY_TOKEN = "esp32secure123"
 
-ACCESS_TOKEN = "YOUR_PERMANENT_ACCESS_TOKEN"
+ACCESS_TOKEN = "YOUR_NEW_PERMANENT_TOKEN"
 
 PHONE_NUMBER_ID = "1147823905079127"
+
+# ESP32 LOCAL SERVER
+ESP32_URL = "http://192.168.137.50/command"
 
 # ============================================================
 # SEND WHATSAPP MESSAGE
 # ============================================================
 
-def send_whatsapp_message(to, message):
+def send_whatsapp(to, message):
 
     url = f"https://graph.facebook.com/v22.0/{PHONE_NUMBER_ID}/messages"
 
@@ -38,7 +41,7 @@ def send_whatsapp_message(to, message):
 
     response = requests.post(url, headers=headers, json=data)
 
-    print("WhatsApp Response:", response.text)
+    print(response.text)
 
 # ============================================================
 # VERIFY WEBHOOK
@@ -58,10 +61,10 @@ def verify():
 
         return "Verification failed", 403
 
-    return "Hello", 200
+    return "OK", 200
 
 # ============================================================
-# RECEIVE WHATSAPP MESSAGES
+# RECEIVE WHATSAPP MESSAGE
 # ============================================================
 
 @app.route("/webhook", methods=["POST"])
@@ -81,62 +84,39 @@ def webhook():
 
             message = value["messages"][0]
 
+            if message.get("type") != "text":
+                return "OK", 200
+
             sender = message["from"]
+
             text = message["text"]["body"]
 
-            command = text.lower().strip()
-
-            print(f"COMMAND: {command}")
+            print("MESSAGE:", text)
 
             # ====================================================
-            # COMMAND PROCESSING
+            # FORWARD TO ESP32
             # ====================================================
 
-            if command == "room 1 on":
-                reply = "Room 1 turned ON"
+            esp32_response = requests.post(
+                ESP32_URL,
+                data=text,
+                timeout=5
+            )
 
-            elif command == "room 1 off":
-                reply = "Room 1 turned OFF"
-
-            elif command == "room 2 on":
-                reply = "Room 2 turned ON"
-
-            elif command == "room 2 off":
-                reply = "Room 2 turned OFF"
-
-            elif command == "all lights on":
-                reply = "All lights turned ON"
-
-            elif command == "all lights off":
-                reply = "All lights turned OFF"
-
-            elif command == "status":
-                reply = "Room1: OFF\nRoom2: OFF"
-
-            else:
-                reply = (
-                    "Invalid command.\n"
-                    "Use:\n"
-                    "Room 1 On\n"
-                    "Room 1 Off\n"
-                    "Room 2 On\n"
-                    "Room 2 Off\n"
-                    "All Lights On\n"
-                    "All Lights Off\n"
-                    "Status"
-                )
+            reply = esp32_response.text
 
             # ====================================================
-            # SEND RESPONSE
+            # SEND BACK TO USER
             # ====================================================
 
-            send_whatsapp_message(sender, reply)
+            send_whatsapp(sender, reply)
 
         return "EVENT_RECEIVED", 200
 
     except Exception as e:
 
         print("ERROR:", str(e))
+
         return "ERROR", 500
 
 # ============================================================

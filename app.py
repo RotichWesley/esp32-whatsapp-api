@@ -4,24 +4,19 @@ import json
 
 app = Flask(__name__)
 
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
 VERIFY_TOKEN = "esp32secure123"
 
-ACCESS_TOKEN = "EAASO0nhfJKMBRZA9eXknvl2ZAU33xGtAtNAI1LAWFWOXUgZAN3uRnJBTlAfHjshKREZBQvDpxhbO49k1v4dEA7tMtTG5FsqK3AP1foZB8dwIiU3RZCPrEXNFNVRD6rWCDC5zAN11GPrL4Ba0CJmGhSLPDdfW00JueAIzHlmRADZA8OEeu8heZCTX6YqRJzs70QZDZD"
+ACCESS_TOKEN = "EAASO0nhfJKMBRcXaZAdgQBFqS5OGdysUXWKko1szfFfkWQz2Dc2ilJZBhs9fNL1uVuyPtHp09clLDKDpxkdOclI4mplPdzShIPGyWZCMykGyxgE4CZCSJ1d21ZBCmIvxBq5hpIdQrsb5R4jBQCk6t9MnYBCLp1e2fkZCAZAUtZBaWzzWqh37pyZCboV9tLOXFIgZDZD"
 
 PHONE_NUMBER_ID = "1147823905079127"
 
-# ESP32 LOCAL SERVER
-ESP32_URL = "http://192.168.137.196/command"
+latest_command = ""
 
 # ============================================================
 # SEND WHATSAPP MESSAGE
 # ============================================================
 
-def send_whatsapp(to, message):
+def send_whatsapp_message(to, message):
 
     url = f"https://graph.facebook.com/v22.0/{PHONE_NUMBER_ID}/messages"
 
@@ -54,21 +49,19 @@ def verify():
     token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
 
-    if mode and token:
+    if mode == "subscribe" and token == VERIFY_TOKEN:
+        return challenge, 200
 
-        if mode == "subscribe" and token == VERIFY_TOKEN:
-            return challenge, 200
-
-        return "Verification failed", 403
-
-    return "OK", 200
+    return "Verification Failed", 403
 
 # ============================================================
-# RECEIVE WHATSAPP MESSAGE
+# RECEIVE WHATSAPP
 # ============================================================
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
+
+    global latest_command
 
     try:
 
@@ -82,42 +75,43 @@ def webhook():
 
         if "messages" in value:
 
-            message = value["messages"][0]
+            msg = value["messages"][0]
 
-            if message.get("type") != "text":
-                return "OK", 200
+            sender = msg["from"]
 
-            sender = message["from"]
+            text = msg["text"]["body"]
 
-            text = message["text"]["body"]
+            latest_command = text.strip()
 
-            print("MESSAGE:", text)
+            print("NEW COMMAND:", latest_command)
 
-            # ====================================================
-            # FORWARD TO ESP32
-            # ====================================================
-
-            esp32_response = requests.post(
-                ESP32_URL,
-                data=text,
-                timeout=5
+            send_whatsapp_message(
+                sender,
+                f"Command Received: {latest_command}"
             )
 
-            reply = esp32_response.text
-
-            # ====================================================
-            # SEND BACK TO USER
-            # ====================================================
-
-            send_whatsapp(sender, reply)
-
-        return "EVENT_RECEIVED", 200
+        return "OK", 200
 
     except Exception as e:
 
         print("ERROR:", str(e))
 
         return "ERROR", 500
+
+# ============================================================
+# ESP32 FETCH COMMAND
+# ============================================================
+
+@app.route("/get_command", methods=["GET"])
+def get_command():
+
+    global latest_command
+
+    cmd = latest_command
+
+    latest_command = ""
+
+    return cmd, 200
 
 # ============================================================
 # MAIN

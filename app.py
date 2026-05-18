@@ -11,7 +11,7 @@ app = Flask(__name__)
 
 VERIFY_TOKEN = "esp32secure123"
 
-ACCESS_TOKEN = "EAASO0nhfJKMBRcXaZAdgQBFqS5OGdysUXWKko1szfFfkWQz2Dc2ilJZBhs9fNL1uVuyPtHp09clLDKDpxkdOclI4mplPdzShIPGyWZCMykGyxgE4CZCSJ1d21ZBCmIvxBq5hpIdQrsb5R4jBQCk6t9MnYBCLp1e2fkZCAZAUtZBaWzzWqh37pyZCboV9tLOXFIgZDZD"
+ACCESS_TOKEN = "YOUR_PERMANENT_ACCESS_TOKEN"
 
 PHONE_NUMBER_ID = "1147823905079127"
 
@@ -38,7 +38,6 @@ def add_log(message):
 
     system_logs.append(entry)
 
-    # Keep only latest logs
     if len(system_logs) > 200:
         system_logs.pop(0)
 
@@ -111,7 +110,7 @@ def verify():
     return "Verification failed", 403
 
 # ============================================================
-# RECEIVE WHATSAPP
+# RECEIVE WHATSAPP MESSAGE
 # ============================================================
 
 @app.route("/webhook", methods=["POST"])
@@ -132,7 +131,7 @@ def webhook():
         changes = entry["changes"][0]
         value = changes["value"]
 
-        # Ignore status updates
+        # Ignore delivery/read status updates
         if "messages" not in value:
 
             add_log("No message field found")
@@ -141,15 +140,15 @@ def webhook():
 
         message = value["messages"][0]
 
-        sender = message["from"]
-
-        last_sender = sender
-
         if "text" not in message:
 
             add_log("Non-text message ignored")
 
             return "EVENT_RECEIVED", 200
+
+        sender = message["from"]
+
+        last_sender = sender
 
         text = message["text"]["body"]
 
@@ -157,11 +156,8 @@ def webhook():
 
         add_log(f"COMMAND RECEIVED: {latest_command}")
 
-        # Acknowledge receipt only
-        send_whatsapp_message(
-            sender,
-            f"Command Received: {latest_command}"
-        )
+        # DO NOT SEND REPLY HERE
+        # ESP32 WILL PROCESS FIRST
 
         return "EVENT_RECEIVED", 200
 
@@ -187,6 +183,7 @@ def get_command():
         latest_command = ""
 
         if cmd != "":
+
             add_log(f"ESP32 FETCHED COMMAND: {cmd}")
 
             return cmd, 200
@@ -200,7 +197,7 @@ def get_command():
         return "ERROR", 500
 
 # ============================================================
-# ESP32 SEND STATUS BACK
+# ESP32 SEND STATUS
 # ============================================================
 
 @app.route("/device_status", methods=["POST"])

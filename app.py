@@ -1,8 +1,13 @@
 from flask import Flask, request
 import requests
 import json
+from datetime import datetime
 
 app = Flask(__name__)
+
+# ============================================================
+# CONFIGURATION
+# ============================================================
 
 VERIFY_TOKEN = "esp32secure123"
 
@@ -10,7 +15,31 @@ ACCESS_TOKEN = "EAASO0nhfJKMBRcXaZAdgQBFqS5OGdysUXWKko1szfFfkWQz2Dc2ilJZBhs9fNL1
 
 PHONE_NUMBER_ID = "1147823905079127"
 
+# ============================================================
+# GLOBAL STORAGE
+# ============================================================
+
 latest_command = ""
+
+system_logs = []
+
+# ============================================================
+# LOG FUNCTION
+# ============================================================
+
+def add_log(message):
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    entry = f"[{timestamp}] {message}"
+
+    print(entry)
+
+    system_logs.append(entry)
+
+    # Keep only latest 100 logs
+    if len(system_logs) > 100:
+        system_logs.pop(0)
 
 # ============================================================
 # SEND WHATSAPP MESSAGE
@@ -18,25 +47,46 @@ latest_command = ""
 
 def send_whatsapp_message(to, message):
 
-    url = f"https://graph.facebook.com/v22.0/{PHONE_NUMBER_ID}/messages"
+    try:
 
-    headers = {
-        "Authorization": f"Bearer {ACCESS_TOKEN}",
-        "Content-Type": "application/json"
-    }
+        url = f"https://graph.facebook.com/v22.0/{PHONE_NUMBER_ID}/messages"
 
-    data = {
-        "messaging_product": "whatsapp",
-        "to": to,
-        "type": "text",
-        "text": {
-            "body": message
+        headers = {
+            "Authorization": f"Bearer {ACCESS_TOKEN}",
+            "Content-Type": "application/json"
         }
-    }
 
-    response = requests.post(url, headers=headers, json=data)
+        data = {
+            "messaging_product": "whatsapp",
+            "to": to,
+            "type": "text",
+            "text": {
+                "body": message
+            }
+        }
 
-    print(response.text)
+        response = requests.post(
+            url,
+            headers=headers,
+            json=data
+        )
+
+        add_log(f"WhatsApp Sent -> {to}")
+
+        add_log(f"Meta Response: {response.text}")
+
+    except Exception as e:
+
+        add_log(f"WhatsApp Send ERROR: {str(e)}")
+
+# ============================================================
+# HOME
+# ============================================================
+
+@app.route("/")
+def home():
+
+    return "ESP32 WhatsApp API Running", 200
 
 # ============================================================
 # VERIFY WEBHOOK
@@ -50,9 +100,14 @@ def verify():
     challenge = request.args.get("hub.challenge")
 
     if mode == "subscribe" and token == VERIFY_TOKEN:
+
+        add_log("Webhook Verified Successfully")
+
         return challenge, 200
 
-    return "Verification Failed", 403
+    add_log("Webhook Verification Failed")
+
+    return "Verification failed", 403
 
 # ============================================================
 # RECEIVE WHATSAPP
@@ -67,7 +122,9 @@ def webhook():
 
         body = request.get_json()
 
-        print(json.dumps(body, indent=2))
+        add_log("Webhook POST Received")
+
+        add_log(json.dumps(body, indent=2))
 
         entry = body["entry"][0]
         changes = entry["changes"][0]
@@ -75,26 +132,36 @@ def webhook():
 
         if "messages" in value:
 
-            msg = value["messages"][0]
+            message = value["messages"][0]
 
-            sender = msg["from"]
+            sender = message["from"]
 
-            text = msg["text"]["body"]
+            if "text" not in message:
+
+                add_log("Non-text message ignored")
+
+                return "OK", 200
+
+            text = message["text"]["body"]
 
             latest_command = text.strip()
 
-            print("NEW COMMAND:", latest_command)
+            add_log(f"COMMAND RECEIVED: {latest_command}")
 
             send_whatsapp_message(
                 sender,
                 f"Command Received: {latest_command}"
             )
 
-        return "OK", 200
+        else:
+
+            add_log("No message field found")
+
+        return "EVENT_RECEIVED", 200
 
     except Exception as e:
 
-        print("ERROR:", str(e))
+        add_log(f"WEBHOOK ERROR: {str(e)}")
 
         return "ERROR", 500
 
@@ -107,16 +174,37 @@ def get_command():
 
     global latest_command
 
-    cmd = latest_command
+    try:
 
-    latest_command = ""
+        cmd = latest_command
 
-    return cmd, 200
+        latest_command = ""
+
+        add_log(f"ESP32 FETCHED COMMAND: {cmd}")
+
+        return cmd, 200
+
+    except Exception as e:
+
+        add_log(f"GET_COMMAND ERROR: {str(e)}")
+
+        return "ERROR", 500
+
+# ============================================================
+# LOG VIEWER
+# ============================================================
+
+@app.route("/logs")
+def logs():
+
+    return "<br>".join(system_logs), 200
 
 # ============================================================
 # MAIN
 # ============================================================
 
 if __name__ == "__main__":
+
+    add_log("Flask Server Started")
 
     app.run(host="0.0.0.0", port=5000)

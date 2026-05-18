@@ -20,6 +20,7 @@ PHONE_NUMBER_ID = "1147823905079127"
 # ============================================================
 
 latest_command = ""
+last_sender = ""
 
 system_logs = []
 
@@ -37,8 +38,8 @@ def add_log(message):
 
     system_logs.append(entry)
 
-    # Keep only latest 100 logs
-    if len(system_logs) > 100:
+    # Keep only latest logs
+    if len(system_logs) > 200:
         system_logs.pop(0)
 
 # ============================================================
@@ -117,6 +118,7 @@ def verify():
 def webhook():
 
     global latest_command
+    global last_sender
 
     try:
 
@@ -130,32 +132,36 @@ def webhook():
         changes = entry["changes"][0]
         value = changes["value"]
 
-        if "messages" in value:
-
-            message = value["messages"][0]
-
-            sender = message["from"]
-
-            if "text" not in message:
-
-                add_log("Non-text message ignored")
-
-                return "OK", 200
-
-            text = message["text"]["body"]
-
-            latest_command = text.strip()
-
-            add_log(f"COMMAND RECEIVED: {latest_command}")
-
-            send_whatsapp_message(
-                sender,
-                f"Command Received: {latest_command}"
-            )
-
-        else:
+        # Ignore status updates
+        if "messages" not in value:
 
             add_log("No message field found")
+
+            return "EVENT_RECEIVED", 200
+
+        message = value["messages"][0]
+
+        sender = message["from"]
+
+        last_sender = sender
+
+        if "text" not in message:
+
+            add_log("Non-text message ignored")
+
+            return "EVENT_RECEIVED", 200
+
+        text = message["text"]["body"]
+
+        latest_command = text.strip()
+
+        add_log(f"COMMAND RECEIVED: {latest_command}")
+
+        # Acknowledge receipt only
+        send_whatsapp_message(
+            sender,
+            f"Command Received: {latest_command}"
+        )
 
         return "EVENT_RECEIVED", 200
 
@@ -180,13 +186,48 @@ def get_command():
 
         latest_command = ""
 
-        add_log(f"ESP32 FETCHED COMMAND: {cmd}")
+        if cmd != "":
+            add_log(f"ESP32 FETCHED COMMAND: {cmd}")
 
-        return cmd, 200
+            return cmd, 200
+
+        return "NO_COMMAND", 200
 
     except Exception as e:
 
         add_log(f"GET_COMMAND ERROR: {str(e)}")
+
+        return "ERROR", 500
+
+# ============================================================
+# ESP32 SEND STATUS BACK
+# ============================================================
+
+@app.route("/device_status", methods=["POST"])
+def device_status():
+
+    global last_sender
+
+    try:
+
+        data = request.get_json()
+
+        status = data.get("status", "")
+
+        add_log(f"ESP32 STATUS: {status}")
+
+        if last_sender != "":
+
+            send_whatsapp_message(
+                last_sender,
+                status
+            )
+
+        return "OK", 200
+
+    except Exception as e:
+
+        add_log(f"DEVICE_STATUS ERROR: {str(e)}")
 
         return "ERROR", 500
 

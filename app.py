@@ -15,7 +15,7 @@ ACCESS_TOKEN = "EAASO0nhfJKMBRZA9eXknvl2ZAU33xGtAtNAI1LAWFWOXUgZAN3uRnJBTlAfHjsh
 PHONE_NUMBER_ID = "1147823905079127"
 
 # ESP32 LOCAL SERVER
-ESP32_URL = "http://192.168.137.50/command"
+ESP32_URL = "http://192.168.137.196/command"
 
 # ============================================================
 # SEND WHATSAPP MESSAGE
